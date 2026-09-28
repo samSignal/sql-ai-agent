@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQL AI Agent</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#667085; --line:#e4e7ec; --accent:#0f766e; --err:#b42318; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  form { display:flex; gap:8px; flex-wrap:wrap; }
+  input { flex:1; min-width:220px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  .chips button { background:#e6f4f1; color:var(--accent); padding:4px 10px; font-size:13px; margin:8px 6px 0 0; border-radius:999px; }
+  .q { font-weight:600; margin-top:16px; }
+  .a { white-space:pre-wrap; margin-top:4px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:10px 12px; border-radius:8px; overflow-x:auto; font-size:13px; }
+  details { margin-top:8px; font-size:13px; }
+  .step { border-left:3px solid var(--line); padding:4px 10px; margin:8px 0; }
+  .step.bad { border-color: var(--err); }
+  .step pre { max-height: 180px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SQL AI Agent</h1>
+  <div class="muted" id="status">Loading…</div>
+  <section class="card">
+    <form id="f">
+      <input id="q" placeholder="Ask a question about the data…" autocomplete="off">
+      <button id="b">Ask</button>
+    </form>
+    <div class="chips" id="chips"></div>
+    <div id="out"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const examples = ["Which 5 products earned the most revenue?", "How many customers do we have per country?",
+                  "What share of orders were cancelled?", "Who is our top customer by total spend?"];
+$('chips').innerHTML = examples.map(e => `<button type="button">${esc(e)}</button>`).join('');
+$('chips').onclick = (e) => { if (e.target.tagName === 'BUTTON') { $('q').value = e.target.textContent; $('f').requestSubmit(); } };
+
+fetch('/health').then(r => r.json()).then(h => $('status').textContent = `Model: ${h.model} · Tables: ${h.tables.join(', ')}`)
+  .catch(() => $('status').textContent = 'Backend not reachable');
+
+$('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $('q').value.trim(); if (!q) return;
+  $('b').disabled = true; $('b').textContent = 'Thinking…';
+  try {
+    const r = await fetch('/ask', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question:q}) });
+    const a = await r.json();
+    const steps = (a.steps || []).map((s, i) =>
+      `<div class="step ${s.ok ? '' : 'bad'}"><b>${i+1}. ${esc(s.tool)}</b> ${esc(JSON.stringify(s.args))}<pre>${esc(s.output)}</pre></div>`).join('');
+    $('out').insertAdjacentHTML('afterbegin',
+      `<div class="q">${esc(q)}</div><div class="a">${esc(a.answer || a.detail)}</div>` +
+      (a.sql ? `<pre>${esc(a.sql)}</pre>` : '') +
+      (steps ? `<details><summary>${a.steps.length} agent steps · ${a.latency_ms} ms</summary>${steps}</details>` : ''));
+    $('q').value = '';
+  } finally { $('b').disabled = false; $('b').textContent = 'Ask'; }
+};
+</script>
+</body>
+</html>
